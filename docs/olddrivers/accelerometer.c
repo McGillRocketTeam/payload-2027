@@ -1,0 +1,157 @@
+/*
+ * accelerometer.c
+ *
+ *  Created on: Jun 8, 2025
+ *      Author: akash
+ */
+
+#include "accelerometer.h"
+#include "serial_monitor.h"
+/*
+ * Note:
+ * ARM math header needs to be included after accelerometer header,
+ * since the accelerometer header includes the STM32 drivers which
+ * contain information about the MCU which the ARM math library needs.
+ */
+//
+#include "arm_math.h"
+#include "ADC.h"
+//Vin = (ADC - 1.6/3.3*(2^16-1)) * 3.3/((2^16)-1))
+//#define ADC_RAW_TO_ACCELERATION(raw) ( ( (float)(raw)-1.6f/3.3f*(65535.0f)) - 3.3f/(65535.0))
+#define ADC_RAW_TO_ACCELERATION(raw) ((((float)(raw)*3.3f/(65536)) - 3.3f/2.0f)/2.0 - 0.051f)*100
+#define NORMALIZED_AMPLITUDE(a, b) (sqrtf(a * a + b * b) / FFT_SIZE_SINGLE)
+#define INDEX_TO_FREQUENCY(i) ((float)i * SAMPLE_RATE_HZ / FFT_SIZE_SINGLE)
+
+void analyze_axis(arm_rfft_fast_instance_f32 *fft_handler, volatile uint16_t fft_buffer[FFT_SIZE_SINGLE], float32_t amplitudes[FFT_AMPLITUDE_SIZE], float gain);
+
+bool PL_Accelerometer_Init(PL_Accelerometer_Handler *accel, TIM_HandleTypeDef *timer)
+{
+    accel->timer = timer;
+    accel->sampling = false;
+    accel->analysis_ready = false;
+    return arm_rfft_fast_init_f32(&accel->fft_handler, FFT_SIZE_SINGLE) == ARM_MATH_SUCCESS;
+}
+
+bool PL_Accelerometer_Start(PL_Accelerometer_Handler *accel)
+{
+    // Return early if already sampling
+    if (accel->sampling)
+    {
+        return true;
+    }
+    
+    // Start the timer which triggers the accelerometer ADC conversions
+    accel->sampling = HAL_TIM_Base_Start(accel->timer) == HAL_OK;
+    
+    // N.B. IEPE v8.1: no power pin that allows us to power the accelerometer on/off
+
+    // Return whether timer was successfully toggled on
+    return accel->sampling;
+}
+
+bool PL_Accelerometer_Is_Sampling(PL_Accelerometer_Handler *accel)
+{
+    return accel->sampling;
+}
+
+bool PL_Accelerometer_Stop(PL_Accelerometer_Handler *accel)
+{
+    // Return early if already not sampling
+    if (!accel->sampling)
+    {
+        return true;
+    }
+
+    // Stop the timer which triggers the accelerometer ADC conversions
+    accel->sampling = HAL_TIM_Base_Stop(accel->timer) != HAL_OK;
+    
+    // N.B. IEPE v8.1: no power pin that allows us to power the accelerometer on/off
+    
+    // Return whether timer was successfully toggled off
+    return accel->sampling;
+}
+
+void PL_Accelerometer_Record(PL_Accelerometer_Handler *accel, volatile uint16_t buffer[FFT_SIZE_TRIPLE])
+{
+    // Copy the data from the buffer to the FFT buffers
+    for (int i = 0; i < FFT_SIZE_TRIPLE; i += 3)
+    {
+        accel->fft_buffer_x[i / 3] = buffer[i];
+        accel->fft_buffer_y[i / 3] = buffer[i + 1];
+        accel->fft_buffer_z[i / 3] = buffer[i + 2];
+    }
+    // Flag that the analysis is ready
+    accel->analysis_ready = true;
+}
+
+void PL_Accelerometer_Analyze(PL_Accelerometer_Handler *accel)
+{
+    if (!accel->analysis_ready)
+    {
+        return; // Analysis not ready
+    }
+
+    // Analyze each axis
+    analyze_axis(&accel->fft_handler, accel->fft_buffer_x, accel->amplitudes_x, ACCELEROMETER_GAIN_X);
+    analyze_axis(&accel->fft_handler, accel->fft_buffer_y, accel->amplitudes_y, ACCELEROMETER_GAIN_Y);
+    analyze_axis(&accel->fft_handler, accel->fft_buffer_z, accel->amplitudes_z, ACCELEROMETER_GAIN_Z);
+
+    accel->analysis_ready = false;
+}
+
+float PL_Accelerometer_PeakFrequency(float *amplitudes, float *peak_amplitude)
+{
+    /*
+     * Ignore the DC frequency. This is the 0 Hz bin, and it tends to mess up the
+     * result when we try to pick out the maximum amplitude frequency bin.
+     */
+    int peak_index = 1;
+
+    for (int i = 1; i < FFT_AMPLITUDE_SIZE; i++)
+    {
+        if (amplitudes[i] > amplitudes[peak_index])
+        {
+            peak_index = i;
+        }
+    }
+    *peak_amplitude = amplitudes[peak_index];
+    printf("%d\r\n", peak_index);
+    return INDEX_TO_FREQUENCY(peak_index);
+}
+
+void analyze_axis(arm_rfft_fast_instance_f32 *fft_handler, volatile uint16_t fft_buffer[FFT_SIZE_SINGLE], float32_t amplitudes[FFT_AMPLITUDE_SIZE], float gain)
+{
+    // Calculate voltage readings based on raw ADC values
+    float32_t voltages[FFT_SIZE_SINGLE] = {0};
+    for (int i = 0; i < FFT_SIZE_SINGLE; i++)
+    {
+        voltages[i] = ADC_RAW_TO_ACCELERATION(fft_buffer[i]);
+    }
+
+    // Remove the DC offset (mean) before the FFT. Without this, the large DC
+    // component's spectral leakage dominates bin 1, pinning the peak search
+    // there so the reported peak frequency never tracks real vibration.
+    float32_t mean = 0.0f;
+    for (int i = 0; i < FFT_SIZE_SINGLE; i++)
+    {
+        mean += voltages[i];
+    }
+    mean /= FFT_SIZE_SINGLE;
+    for (int i = 0; i < FFT_SIZE_SINGLE; i++)
+    {
+        voltages[i] -= mean;
+    }
+
+    // Perform FFT and store in output buffers
+    float32_t fft_outputs[FFT_SIZE_SINGLE] = {0};
+    // The final zero indicates were are not performing an inverse FFT
+    arm_rfft_fast_f32(fft_handler, voltages, fft_outputs, 0);
+
+    // Calculate DC frequency amplitude
+    amplitudes[0] = NORMALIZED_AMPLITUDE(fft_outputs[0], fft_outputs[1]);
+    // Calculate other amplitudes
+    for (int i = 2; i < FFT_SIZE_SINGLE; i += 2)
+    {
+        amplitudes[i / 2] = 2 * NORMALIZED_AMPLITUDE(fft_outputs[i], fft_outputs[i + 1]);
+    }
+}
