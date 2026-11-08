@@ -1,10 +1,13 @@
 #include "MRT_main.h"
 
 /*
- * TODO: superloop or FreeRTOS is still undecided (FC uses FreeRTOS,
- * payload-2026 was a superloop). Either way this is where polling,
- * logging and command handling start.
+ * Superloop (same structure as payload-2026): interrupts only set flags or
+ * fill buffers, and this loop does the polling, logging and command handling.
+ * Never returns.
  */
 void MRT_main(void)
 {
+    while (1) {
+        /* TODO: poll modules, write logs, handle commands. */
+    }
 }

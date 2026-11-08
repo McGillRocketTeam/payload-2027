@@ -1,0 +1,33 @@
+{
+  "build": {
+    "core": "stm32",
+    "cpu": "cortex-m4",
+    "extra_flags": "-DSTM32F407xx -DSTM32",
+    "f_cpu": "168000000L",
+    "mcu": "stm32f407vgt6",
+    "product_line": "STM32F407xx",
+    "variant": "STM32F4xx",
+    "fpu": "hard",
+    "fpv": "fpv4-sp-d16"
+  },
+  "debug": {
+    "jlink_device": "STM32F407VG",
+    "openocd_target": "stm32f4x",
+    "svd_path": "STM32F40x.svd"
+  },
+  "frameworks": [
+    "cmsis",
+    "stm32cube"
+  ],
+  "name": "Payload",
+  "upload": {
+    "maximum_ram_size": 131072,
+    "maximum_size": 1048576,
+    "protocol": "stlink",
+    "protocols": [
+      "stlink"
+    ]
+  },
+  "url": "https://mcgillrocketteam.com",
+  "vendor": "MRT"
+}
