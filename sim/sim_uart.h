@@ -6,10 +6,8 @@
  * Its read/write functions match the uart_read / uart_write members of
  * gps_io_t, csac_io_t and mac_io_t; pass the sim_uart_t* as the handle.
  *
- * Device models sit on the other end:
- *   - produce(): called before every MCU read with the current time, so the
- *     device can emit whatever it would have sent by now (periodic messages)
- *   - on_rx():   called with every chunk the MCU writes (commands)
+ * Device models sit on the other end: they send with sim_uart_send*() (from
+ * events, for periodic output) and get every chunk the MCU writes in on_rx().
  *
  * Timing is real: at `baud`, each byte takes 10 bit times (8N1) on the wire,
  * so a burst arrives gradually and an MCU that reads too rarely overflows the
@@ -36,7 +34,6 @@ struct sim_uart {
     uint32_t baud;
     size_t rx_buffer;    /* MCU side buffer, bytes (default 512) */
 
-    void (*produce)(sim_uart_t *u, sim_time_ns_t now, void *user);
     void (*on_rx)(sim_uart_t *u, const uint8_t *buf, size_t len, void *user);
     void *user;
 

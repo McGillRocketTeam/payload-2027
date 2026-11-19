@@ -3,6 +3,8 @@
 #include <math.h>
 #include <stdio.h>
 
+#include "sim_log.h"
+
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -51,6 +53,8 @@ static void heap_swap(size_t a, size_t b)
 bool sim_schedule_ps(sim_time_ps_t t, sim_event_fn fn, void *ctx, uint32_t tag)
 {
     if (heap_n == SIM_MAX_EVENTS || !fn) {
+        sim_log("sim", "error", "event_queue_full", (double)heap_n,
+                "event dropped: something schedules too much");
         return false;
     }
     size_t i = heap_n++;

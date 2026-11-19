@@ -2,6 +2,8 @@
 
 #include <string.h>
 
+#include "sim_log.h"
+
 void sim_uart_init(sim_uart_t *u, const char *name, uint32_t baud)
 {
     memset(u, 0, sizeof(*u));
@@ -9,6 +11,8 @@ void sim_uart_init(sim_uart_t *u, const char *name, uint32_t baud)
     u->baud = baud;
     u->rx_buffer = 512;
 }
+
+static size_t settle(sim_uart_t *u);
 
 static sim_time_ns_t byte_time(const sim_uart_t *u)
 {
@@ -22,6 +26,7 @@ void sim_uart_send_at(sim_uart_t *u, sim_time_ns_t t, const uint8_t *buf, size_t
         u->dropped_bytes += len;
         return;
     }
+    (void)settle(u); /* apply overrun to what has already arrived */
     if (f == SIM_FAULT_STALL) {
         /* sim_device_begin already moved time; push the chunk out too. */
         t = sim_now_ns() > t ? sim_now_ns() : t;
@@ -40,6 +45,7 @@ void sim_uart_send_at(sim_uart_t *u, sim_time_ns_t t, const uint8_t *buf, size_t
     for (size_t i = 0; i < len; i++) {
         if (u->q_count == SIM_UART_QUEUE) {
             u->dropped_bytes += len - i;
+            sim_log(u->base.name, "error", "uart_queue_full", (double)(len - i), NULL);
             break;
         }
         at += bt;
@@ -65,9 +71,6 @@ void sim_uart_send_str(sim_uart_t *u, const char *s)
 /* Count arrived bytes and apply overrun (drop oldest beyond rx_buffer). */
 static size_t settle(sim_uart_t *u)
 {
-    if (u->produce) {
-        u->produce(u, sim_now_ns(), u->user);
-    }
     sim_time_ns_t now = sim_now_ns();
     size_t arrived = 0;
     while (arrived < u->q_count && u->q_t[(u->q_head + arrived) % SIM_UART_QUEUE] <= now) {
@@ -79,6 +82,7 @@ static size_t settle(sim_uart_t *u)
         u->q_count -= drop;
         u->overrun_bytes += drop;
         arrived -= drop;
+        sim_log(u->base.name, "error", "uart_overrun", (double)drop, "bytes lost: MCU read too late");
         sim_device_trace(&u->base, "overrun: %zu bytes lost", drop);
     }
     return arrived;
