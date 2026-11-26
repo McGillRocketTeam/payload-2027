@@ -38,7 +38,7 @@ sensor_status_t csac_poll(csac_t *dev);
 sensor_status_t csac_status(const csac_t *dev);
 bool csac_is_initialized(const csac_t *dev);
 
-/* TODO(workshop): turn 1PPS disciplining on (pad) or off (launch). */
+/* TODO(workshop): turn 1PPS disciplining on (sync task, before launch) or off (after launch). */
 sensor_status_t csac_set_discipline(csac_t *dev, bool enable);
 
 #endif /* SENSORS_CSAC_H_ */

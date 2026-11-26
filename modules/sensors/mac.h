@@ -38,7 +38,7 @@ sensor_status_t mac_poll(mac_t *dev);
 sensor_status_t mac_status(const mac_t *dev);
 bool mac_is_initialized(const mac_t *dev);
 
-/* TODO(workshop): turn 1PPS disciplining on (pad) or off (launch). */
+/* TODO(workshop): turn 1PPS disciplining on (sync task, before launch) or off (after launch). */
 sensor_status_t mac_set_discipline(mac_t *dev, bool enable);
 
 #endif /* SENSORS_MAC_H_ */
