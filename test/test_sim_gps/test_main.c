@@ -374,6 +374,49 @@ void test_backup_power_hot_then_warm_start(void)
     TEST_ASSERT_TRUE(gps.fix);
 }
 
+/* Advance to `before` ahead of the next whole second. */
+static void advance_to_before_next_second(sim_time_ns_t before)
+{
+    sim_time_ns_t now = sim_now_ns();
+    sim_time_ns_t next = (now / SIM_S(1) + 1) * SIM_S(1);
+    if (next - now <= before) {
+        next += SIM_S(1);
+    }
+    sim_advance_ns(next - before - now);
+}
+
+void test_power_off_cancels_the_pulse_already_placed(void)
+{
+    sim_gps_power(&gps, true);
+    use_gps_grid();
+    sim_advance_ns(SIM_S(30));
+    TEST_ASSERT_TRUE(gps.fix);
+    /* 0.5 ms before the next whole second: that pulse is already scheduled. */
+    advance_to_before_next_second(SIM_US(500));
+    uint32_t rises = gps.pps.rises;
+    sim_gps_power(&gps, false);
+    sim_advance_ns(SIM_S(2));
+    TEST_ASSERT_EQUAL_UINT32(rises, gps.pps.rises);
+}
+
+void test_reset_cancels_the_pulse_already_placed(void)
+{
+    sim_gps_power(&gps, true);
+    use_gps_grid();
+    sim_advance_ns(SIM_S(30));
+    TEST_ASSERT_TRUE(gps.fix);
+    /* The 12-byte frame takes 3.125 ms at 38400 baud: it lands ~0.6 ms before
+     * the next whole second, after that pulse was placed (1 ms ahead). */
+    advance_to_before_next_second(SIM_US(3700));
+    uint32_t rises = gps.pps.rises;
+    const uint8_t rst[4] = {0x00, 0x00, 0x02, 0x00}; /* hot start, GNSS-only software reset */
+    send_ubx(0x06, 0x04, rst, sizeof(rst));
+    TEST_ASSERT_TRUE(sim_now_ns() % SIM_S(1) > SIM_S(1) - SIM_MS(1)); /* pulse already placed */
+    TEST_ASSERT_EQUAL_UINT32(rises, gps.pps.rises);                    /* but not fired yet */
+    sim_advance_ns(SIM_MS(1)); /* past the whole second */
+    TEST_ASSERT_EQUAL_UINT32(rises, gps.pps.rises);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -394,5 +437,7 @@ int main(void)
     RUN_TEST(test_utc_grid_waits_for_utc_parameters);
     RUN_TEST(test_airborne_model_ignores_velocity);
     RUN_TEST(test_backup_power_hot_then_warm_start);
+    RUN_TEST(test_power_off_cancels_the_pulse_already_placed);
+    RUN_TEST(test_reset_cancels_the_pulse_already_placed);
     return UNITY_END();
 }

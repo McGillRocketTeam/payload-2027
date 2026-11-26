@@ -213,6 +213,52 @@ void test_typical_unit_noise_matches_density(void)
     TEST_ASSERT_TRUE(fabs(c.accel_offset_g[0]) <= 0.010);
 }
 
+void test_burst_read_of_two_words_rolls_back_to_the_tag(void)
+{
+    start_fifo(LSM6DSR_STREAM_MODE);
+    sim_advance_ms(15);
+    uint16_t before = level();
+    uint8_t b[14];
+    TEST_ASSERT_EQUAL_INT(0, lsm6dsr_read_reg(&ctx, LSM6DSR_FIFO_DATA_OUT_TAG, b, sizeof(b)));
+    for (int w = 0; w < 2; w++) {
+        const uint8_t *p = b + 7 * w;
+        TEST_ASSERT_EQUAL_INT(LSM6DSR_XL_NC_TAG, p[0] >> 3);
+        int16_t z = (int16_t)(p[5] | p[6] << 8);
+        TEST_ASSERT_FLOAT_WITHIN(1.0f, 1000.0f, lsm6dsr_from_fs16g_to_mg(z));
+    }
+    TEST_ASSERT_UINT16_WITHIN(1, before - 2, level()); /* both words popped */
+}
+
+void test_stuck_sensor_repeats_its_own_last_value(void)
+{
+    lsm6dsr_gy_data_rate_set(&ctx, LSM6DSR_GY_ODR_833Hz);
+    lsm6dsr_fifo_gy_batch_set(&ctx, LSM6DSR_GY_BATCHED_AT_833Hz);
+    lsm6dsr_xl_full_scale_set(&ctx, LSM6DSR_16g);
+    lsm6dsr_xl_data_rate_set(&ctx, LSM6DSR_XL_ODR_833Hz);
+    lsm6dsr_fifo_xl_batch_set(&ctx, LSM6DSR_XL_BATCHED_AT_833Hz);
+    sim_inject(&imu.base, SIM_FAULT_STUCK);
+    lsm6dsr_fifo_mode_set(&ctx, LSM6DSR_STREAM_MODE);
+    sim_advance_ms(30);
+    int xl = 0, gy = 0;
+    uint16_t n = level();
+    for (uint16_t i = 0; i < n; i++) {
+        lsm6dsr_fifo_tag_t tag;
+        uint8_t raw[6];
+        lsm6dsr_fifo_sensor_tag_get(&ctx, &tag);
+        lsm6dsr_fifo_out_raw_get(&ctx, raw);
+        int16_t z = (int16_t)(raw[4] | raw[5] << 8);
+        if (tag == LSM6DSR_GYRO_NC_TAG) {
+            gy++;
+            TEST_ASSERT_INT_WITHIN(5, 0, z); /* gyro at rest, not 1 g of accel counts */
+        } else if (tag == LSM6DSR_XL_NC_TAG) {
+            xl++;
+            TEST_ASSERT_FLOAT_WITHIN(1.0f, 1000.0f, lsm6dsr_from_fs16g_to_mg(z));
+        }
+    }
+    TEST_ASSERT_TRUE(xl > 10);
+    TEST_ASSERT_TRUE(gy > 10);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -226,5 +272,7 @@ int main(void)
     RUN_TEST(test_data_ready_latched_and_active_low);
     RUN_TEST(test_data_ready_pulsed_75us);
     RUN_TEST(test_typical_unit_noise_matches_density);
+    RUN_TEST(test_burst_read_of_two_words_rolls_back_to_the_tag);
+    RUN_TEST(test_stuck_sensor_repeats_its_own_last_value);
     return UNITY_END();
 }

@@ -35,6 +35,7 @@ typedef struct {
     FSIZE_t size;
     FSIZE_t synced_size; /* what survives a power cut */
     char path[FF_MAX_LFN + 1];
+    char host[1024];     /* mapped host path: what the open-file lock compares */
 } slot_t;
 
 static slot_t slots[SIM_SD_MAX_TRACKED];
@@ -215,6 +216,41 @@ static void close_all_slots(bool truncate_unsynced)
     sim_sd.open_files = 0;
 }
 
+/*
+ * The card folder gets wiped recursively, so refuse anything that could be the
+ * working tree or above it: empty, "/", "." in any spelling ("./", ".//"), any
+ * ".." component, and (when wiping) absolute paths.
+ */
+static bool root_is_safe(const char *root, bool wipe)
+{
+    if (!root || root[0] == '\0') {
+        return false;
+    }
+    if (wipe && (root[0] == '/' || root[0] == '\\' || (root[0] != '\0' && root[1] == ':'))) {
+        return false;
+    }
+    bool has_real = false;
+    const char *p = root;
+    while (*p) {
+        while (*p == '/' || *p == '\\') {
+            p++;
+        }
+        const char *e = p;
+        while (*e && *e != '/' && *e != '\\') {
+            e++;
+        }
+        size_t n = (size_t)(e - p);
+        if (n == 2 && p[0] == '.' && p[1] == '.') {
+            return false;
+        }
+        if (n > 0 && !(n == 1 && p[0] == '.')) {
+            has_real = true;
+        }
+        p = e;
+    }
+    return has_real;
+}
+
 /* ----------------------------------------------------------- control API */
 
 sim_sd_config_t sim_sd_default_config(const char *root_dir)
@@ -249,10 +285,10 @@ bool sim_sd_init(const sim_sd_config_t *cfg)
     sim_sd.inserted = true;
     sim_sd.generation = 1;
 
-    const char *root = cfg->root_dir;
-    if (!root || root[0] == '\0' || strcmp(root, "/") == 0 || strcmp(root, ".") == 0) {
+    if (!root_is_safe(cfg->root_dir, cfg->wipe_on_init)) {
         return false;
     }
+    const char *root = cfg->root_dir;
     if (!mkdirs(root)) {
         return false;
     }
@@ -345,7 +381,7 @@ FRESULT f_open(FIL *fp, const TCHAR *path, BYTE mode)
         return op_end(FR_DENIED);
     }
     for (int i = 0; i < SIM_SD_MAX_TRACKED; i++) {
-        if (slots[i].used && strcmp(slots[i].path, path) == 0 && (mode & FA_WRITE)) {
+        if (slots[i].used && strcmp(slots[i].host, host) == 0 && (mode & FA_WRITE)) {
             return op_end(FR_LOCKED); /* FatFs FF_FS_LOCK: one writer per file */
         }
     }
@@ -397,6 +433,7 @@ FRESULT f_open(FIL *fp, const TCHAR *path, BYTE mode)
     s->size = (FSIZE_t)old_size;
     s->synced_size = s->size;
     snprintf(s->path, sizeof(s->path), "%s", path);
+    snprintf(s->host, sizeof(s->host), "%s", host);
 
     fp->slot = slot;
     fp->mode = mode;
@@ -439,7 +476,8 @@ FRESULT f_write(FIL *fp, const void *buff, UINT btw, UINT *bw)
                             ? sim_sd.cfg.capacity_bytes - sim_sd.used_bytes
                             : 0;
         if (growth > room) {
-            n -= (UINT)(growth - room);
+            uint64_t cut = growth - room;
+            n = cut >= n ? 0 : n - (UINT)cut; /* a gap past EOF can eat it all */
         }
     }
 
@@ -462,7 +500,7 @@ FRESULT f_write(FIL *fp, const void *buff, UINT btw, UINT *bw)
     }
 
     FSIZE_t end = fp->fptr + (FSIZE_t)written;
-    if (end > s->size) {
+    if (written > 0 && end > s->size) { /* a 0-byte write does not grow the file */
         sim_sd.used_bytes += end - s->size;
         s->size = end;
     }
@@ -602,7 +640,7 @@ FRESULT f_unlink(const TCHAR *path)
         return r;
     }
     for (int i = 0; i < SIM_SD_MAX_TRACKED; i++) {
-        if (slots[i].used && strcmp(slots[i].path, path) == 0) {
+        if (slots[i].used && strcmp(slots[i].host, host) == 0) {
             return FR_LOCKED;
         }
     }

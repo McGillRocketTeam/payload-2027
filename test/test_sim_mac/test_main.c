@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <unity.h>
+#include <stdlib.h>
 
 #include "devices/sim_mac.h"
 #include "sim.h"
@@ -169,6 +170,38 @@ void test_upd_reports_only_changes(void)
     TEST_ASSERT_NULL(strstr(r, ",770,"));
 }
 
+void test_overheat_loses_lock_until_it_cools(void)
+{
+    sim_mac_config_t cfg = sim_mac_default_config(11);
+    cfg.temperature_c = sim_signal_const(70.0); /* baseplate 85 C once warm: above 75 C */
+    sim_mac_init(&mac, "mac1", &cfg);
+    power_up();
+    sim_advance_ns(SIM_S(300));
+    TEST_ASSERT_TRUE(mac.clk.locked);
+    sim_advance_ns(SIM_S(65)); /* hot for more than 60 s while locked */
+    TEST_ASSERT_TRUE(mac.overheated);
+    TEST_ASSERT_FALSE(mac.clk.locked);
+    sim_advance_ns(SIM_S(600)); /* still hot: must not relock */
+    TEST_ASSERT_FALSE(mac.clk.locked);
+    TEST_ASSERT_TRUE(mac.bite.level);
+}
+
+void test_reset_command_keeps_total_locktime(void)
+{
+    power_up();
+    sim_advance_ns(SIM_S(300));
+    TEST_ASSERT_TRUE(mac.clk.locked);
+    sim_advance_ns(SIM_S(100));
+    send("{reset}");
+    (void)recv(3100); /* bootloader, then the application again */
+    TEST_ASSERT_FALSE(mac.clk.locked);
+    const char *r = ask("{get,TotalLocktime}");
+    TEST_ASSERT_EQUAL_CHAR('[', r[0]);
+    TEST_ASSERT_EQUAL_CHAR('=', r[1]);
+    long locked_s = strtol(r + 2, NULL, 10);
+    TEST_ASSERT_TRUE(locked_s >= 100 && locked_s <= 105);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -182,5 +215,7 @@ int main(void)
     RUN_TEST(test_disciplines_to_gps_and_reports_lock);
     RUN_TEST(test_pps_source_selects_input);
     RUN_TEST(test_upd_reports_only_changes);
+    RUN_TEST(test_overheat_loses_lock_until_it_cools);
+    RUN_TEST(test_reset_command_keeps_total_locktime);
     return UNITY_END();
 }

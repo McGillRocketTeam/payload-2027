@@ -54,6 +54,12 @@ void sim_advance_ps(sim_time_ps_t dt);
 void sim_advance_ms(uint32_t ms);
 void sim_run_until_ps(sim_time_ps_t t);
 
+/*
+ * *t = now + s, in picoseconds. Returns false (t untouched) if s is negative,
+ * NaN, infinite, or too large to represent: callers treat that as "never".
+ */
+bool sim_ps_after_s(double s, sim_time_ps_t *t);
+
 /* Drop-in for every io struct's delay_ms(handle, ms) member. */
 void sim_delay_ms(void *handle, uint32_t ms);
 

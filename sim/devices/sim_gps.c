@@ -477,6 +477,35 @@ static void send_nmea_epoch(sim_gps_t *d, double t_epoch)
 static void second_event(void *ctx, uint32_t tag);
 static void epoch_event(void *ctx, uint32_t tag);
 
+/* Pulse edges are placed ahead of time; tagging them with gen means a power-off
+ * or reset in between cancels them, as it would stop the real timepulse. */
+static void pps_edge_event(sim_gps_t *d, uint32_t tag, bool level)
+{
+    if (tag != d->gen || !d->base.powered) {
+        return;
+    }
+    sim_pin_set_exact(&d->pps, level, sim_event_time_ps());
+}
+
+static void pps_high_event(void *ctx, uint32_t tag)
+{
+    pps_edge_event(ctx, tag, true);
+}
+
+static void pps_low_event(void *ctx, uint32_t tag)
+{
+    pps_edge_event(ctx, tag, false);
+}
+
+static void pps_set_at(sim_gps_t *d, bool level, sim_time_ps_t t)
+{
+    if (t <= sim_now_ps()) {
+        sim_pin_set(&d->pps, level);
+        return;
+    }
+    sim_schedule_ps(t, level ? pps_high_event : pps_low_event, d, d->gen);
+}
+
 static void schedule_second(sim_gps_t *d, double k)
 {
     sim_schedule_ps((sim_time_ps_t)llround((k - PRE_EDGE_S) * 1e12), second_event, d, d->gen);
@@ -521,8 +550,8 @@ static void second_event(void *ctx, uint32_t tag)
         }
         sim_time_ps_t t = (sim_time_ps_t)llround((k + err) * 1e12);
         sim_time_ps_t w = (sim_time_ps_t)len_us * 1000000ULL;
-        sim_pin_set_at(&d->pps, rising, t);
-        sim_pin_set_at(&d->pps, !rising, t + w);
+        pps_set_at(d, rising, t);
+        pps_set_at(d, !rising, t + w);
         if (sim_log_is_open()) {
             sim_log(d->base.name, "truth", "pps_offset_s", err, "edge %.0f", k);
         }

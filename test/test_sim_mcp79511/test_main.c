@@ -218,6 +218,32 @@ void test_crystal_mode_with_an_external_clock_is_flagged(void)
     TEST_ASSERT_EQUAL_UINT32(1, sim_log_count("rtc1", "error"));
 }
 
+void test_invalid_month_zero_rolls_over_safely(void)
+{
+    wr(0x06, 0x00); /* month 0: invalid, e.g. from a zeroed time struct */
+    wr(0x05, 0x31);
+    wr(0x03, 0x23);
+    wr(0x02, 0x59);
+    wr(0x01, 0x59);
+    start_1hz();
+    sim_advance_ms(1500); /* first tick: 23:59:59 -> 00:00:00, next day */
+    TEST_ASSERT_EQUAL_HEX8(0x00, rd(0x03) & 0x3F);
+    TEST_ASSERT_EQUAL_HEX8(0x01, rd(0x05));
+    TEST_ASSERT_EQUAL_HEX8(0x01, rd(0x06) & 0x1F);
+}
+
+void test_stopping_the_oscillator_cancels_the_pending_falling_edge(void)
+{
+    start_1hz();
+    sim_advance_ms(2200); /* rose at 2.0 s, falling edge due at 2.5 s */
+    TEST_ASSERT_TRUE(rtc.mfp.level);
+    uint32_t falls = rtc.mfp.falls;
+    wr(0x08, 0x40); /* EXTOSC off, SQWEN kept: the clock stops */
+    sim_advance_ms(1300);
+    TEST_ASSERT_TRUE(rtc.mfp.level);
+    TEST_ASSERT_EQUAL_UINT32(falls, rtc.mfp.falls);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -232,5 +258,7 @@ int main(void)
     RUN_TEST(test_eeprom_page_wraps_inside_8_bytes);
     RUN_TEST(test_eui48_preprogrammed);
     RUN_TEST(test_crystal_mode_with_an_external_clock_is_flagged);
+    RUN_TEST(test_invalid_month_zero_rolls_over_safely);
+    RUN_TEST(test_stopping_the_oscillator_cancels_the_pending_falling_edge);
     return UNITY_END();
 }

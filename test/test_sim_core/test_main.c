@@ -1,7 +1,10 @@
 #include <string.h>
 #include <unity.h>
+#include <stdio.h>
+#include <math.h>
 
 #include "sim.h"
+#include "sim_log.h"
 #include "sim_device.h"
 #include "sim_signal.h"
 #include "sim_uart.h"
@@ -187,6 +190,44 @@ void test_uart_off_is_silent(void)
     TEST_ASSERT_EQUAL_size_t(0, sim_uart_read(&uart, buf, sizeof(buf)));
 }
 
+void test_ps_after_s_rejects_unrepresentable_times(void)
+{
+    sim_advance_ms(1);
+    sim_time_ps_t t = 42;
+    TEST_ASSERT_FALSE(sim_ps_after_s(-1.0, &t));
+    TEST_ASSERT_FALSE(sim_ps_after_s(NAN, &t));
+    TEST_ASSERT_FALSE(sim_ps_after_s(INFINITY, &t));
+    TEST_ASSERT_FALSE(sim_ps_after_s(1e9, &t)); /* 1e21 ps: does not fit */
+    TEST_ASSERT_EQUAL_UINT64(42, t);            /* untouched on failure */
+    TEST_ASSERT_TRUE(sim_ps_after_s(1.5, &t));
+    TEST_ASSERT_EQUAL_UINT64(SIM_MS(1) * SIM_PS_PER_NS + 1500000000000ULL, t);
+}
+
+static void noop_event(void *ctx, uint32_t tag)
+{
+    (void)ctx;
+    (void)tag;
+}
+
+void test_null_event_fn_is_logged_as_such(void)
+{
+    const char *path = ".pio/sim/core_null_event_fn.csv";
+    TEST_ASSERT_TRUE(sim_log_open(path));
+    TEST_ASSERT_TRUE(sim_schedule_ps(10, noop_event, NULL, 0));
+    TEST_ASSERT_FALSE(sim_schedule_ps(10, NULL, NULL, 0));
+    TEST_ASSERT_EQUAL_size_t(1, sim_pending_events());
+    sim_log_close();
+
+    char text[4096] = "";
+    FILE *f = fopen(path, "r");
+    TEST_ASSERT_NOT_NULL(f);
+    size_t n = fread(text, 1, sizeof(text) - 1, f);
+    fclose(f);
+    text[n] = '\0';
+    TEST_ASSERT_NOT_NULL(strstr(text, "null_event_fn"));
+    TEST_ASSERT_NULL(strstr(text, "event_queue_full"));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -205,5 +246,7 @@ int main(void)
     RUN_TEST(test_uart_device_answers_commands);
     RUN_TEST(test_uart_overrun_when_mcu_reads_too_rarely);
     RUN_TEST(test_uart_off_is_silent);
+    RUN_TEST(test_ps_after_s_rejects_unrepresentable_times);
+    RUN_TEST(test_null_event_fn_is_logged_as_such);
     return UNITY_END();
 }

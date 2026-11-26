@@ -162,7 +162,10 @@ static void status_event(void *ctx, uint32_t tag);
 static void schedule_status(sim_csac_t *d, double step_s)
 {
     d->step_s = step_s;
-    sim_schedule_ps(sim_now_ps() + (sim_time_ps_t)(step_s * 1e12), status_event, d, d->gen);
+    sim_time_ps_t t;
+    if (sim_ps_after_s(step_s, &t)) { /* INFINITY or huge: never relocks */
+        sim_schedule_ps(t, status_event, d, d->gen);
+    }
 }
 
 static void status_event(void *ctx, uint32_t tag)

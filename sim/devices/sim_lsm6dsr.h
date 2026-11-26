@@ -103,6 +103,8 @@ struct sim_lsm6dsr {
     uint64_t fifo_k[3];          /* next batch index per stream: G, XL, T */
     sim_time_ps_t last_slot_ps;
     uint8_t tag_cnt;
+    uint8_t stream_last[3][6]; /* last batched data per stream (STUCK fault) */
+    bool stream_has_last[3];
     bool ovr_latched;
     uint32_t bdr_counter;
     bool counter_ia;

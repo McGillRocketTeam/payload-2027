@@ -52,7 +52,11 @@ static void heap_swap(size_t a, size_t b)
 
 bool sim_schedule_ps(sim_time_ps_t t, sim_event_fn fn, void *ctx, uint32_t tag)
 {
-    if (heap_n == SIM_MAX_EVENTS || !fn) {
+    if (!fn) {
+        sim_log("sim", "error", "null_event_fn", 0, "event dropped: no handler");
+        return false;
+    }
+    if (heap_n == SIM_MAX_EVENTS) {
         sim_log("sim", "error", "event_queue_full", (double)heap_n,
                 "event dropped: something schedules too much");
         return false;
@@ -212,6 +216,20 @@ void sim_advance_ns(sim_time_ns_t dt)
 void sim_advance_ms(uint32_t ms)
 {
     sim_advance_ns(SIM_MS(ms));
+}
+
+bool sim_ps_after_s(double s, sim_time_ps_t *t)
+{
+    if (!(s >= 0.0) || !isfinite(s)) {
+        return false;
+    }
+    double ps = s * 1e12;
+    /* 2^63 keeps the double -> integer conversion and the sum well defined. */
+    if (ps >= 9223372036854775808.0 || (sim_time_ps_t)ps > UINT64_MAX - now_ps) {
+        return false;
+    }
+    *t = now_ps + (sim_time_ps_t)llround(ps);
+    return true;
 }
 
 void sim_delay_ms(void *handle, uint32_t ms)

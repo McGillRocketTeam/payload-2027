@@ -222,6 +222,16 @@ void test_unknown_command_and_power_off_silence(void)
     TEST_ASSERT_FALSE(csac.bite.level);
 }
 
+void test_lose_lock_forever_never_relocks(void)
+{
+    power_and_lock();
+    sim_csac_lose_lock(&csac, INFINITY);
+    sim_advance_ns(SIM_S(1000));
+    TEST_ASSERT_NOT_EQUAL(0, csac.status);
+    TEST_ASSERT_FALSE(csac.clk.locked);
+    TEST_ASSERT_TRUE(csac.bite.level);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -237,5 +247,6 @@ int main(void)
     RUN_TEST(test_lock_loss_raises_bite_within_one_second);
     RUN_TEST(test_tod_query_answers_after_next_pps);
     RUN_TEST(test_unknown_command_and_power_off_silence);
+    RUN_TEST(test_lose_lock_forever_never_relocks);
     return UNITY_END();
 }

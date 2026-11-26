@@ -88,7 +88,10 @@ static bool leap(int yy)
 static int days_in(int month, int yy)
 {
     static const int d[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
-    return month == 2 && leap(yy) ? 29 : d[(month - 1) % 12];
+    if (month < 1 || month > 12) {
+        return 31; /* invalid BCD month written by firmware: don't index out of range */
+    }
+    return month == 2 && leap(yy) ? 29 : d[month - 1];
 }
 
 static void refresh_lpyr(sim_mcp79511_t *d);
@@ -194,6 +197,16 @@ static double trim_cycles(sim_mcp79511_t *d)
 
 static void tick_event(void *ctx, uint32_t tag);
 
+/* Falling half of the square wave; gen-tagged so stopping the clock cancels it. */
+static void mfp_low_event(void *ctx, uint32_t tag)
+{
+    sim_mcp79511_t *d = ctx;
+    if (tag != d->gen || !d->running) {
+        return;
+    }
+    sim_pin_set_exact(&d->mfp, false, sim_event_time_ps());
+}
+
 static void schedule_tick(sim_mcp79511_t *d)
 {
     double t = true_time_of_cycle(d, d->tick_cycle);
@@ -226,7 +239,12 @@ static void tick_event(void *ctx, uint32_t tag)
     if (square_wave_1hz(d)) {
         sim_pin_set_exact(&d->mfp, true, t);
         double half = true_time_of_cycle(d, d->last_tick_cycle + length / 2.0);
-        sim_pin_set_at(&d->mfp, false, (sim_time_ps_t)llround(half * 1e12));
+        sim_time_ps_t half_ps = (sim_time_ps_t)llround(half * 1e12);
+        if (half_ps <= sim_now_ps()) {
+            sim_pin_set(&d->mfp, false);
+        } else {
+            sim_schedule_ps(half_ps, mfp_low_event, d, d->gen);
+        }
         if (sim_log_is_open()) {
             double ts = (double)t / 1e12;
             sim_log(d->base.name, "truth", "pps_offset_s", ts - round(ts), "tick %llu",

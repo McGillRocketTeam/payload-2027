@@ -64,6 +64,7 @@ static void fifo_restart(sim_lsm6dsr_t *dev)
     dev->fifo_start_ps = sim_now_ps();
     memset(dev->fifo_k, 0, sizeof(dev->fifo_k));
     dev->last_slot_ps = 0;
+    memset(dev->stream_has_last, 0, sizeof(dev->stream_has_last));
 }
 
 static void fifo_clear(sim_lsm6dsr_t *dev)
@@ -397,9 +398,8 @@ static void push_word(sim_lsm6dsr_t *d, int s, sim_time_ps_t t, uint64_t k)
     w->tag = (uint8_t)(tag | (x & 1)); /* UNVERIFIED parity rule */
     memset(w->data, 0, sizeof(w->data));
     sim_time_ns_t tns = t / SIM_PS_PER_NS;
-    if (sim_device_is_stuck(&d->base) && d->fifo_count > 0) {
-        int prev = (d->fifo_head + d->fifo_count - 1) % SIM_LSM6DSR_FIFO_WORDS;
-        memcpy(w->data, d->fifo[prev].data, 6);
+    if (sim_device_is_stuck(&d->base) && d->stream_has_last[s]) {
+        memcpy(w->data, d->stream_last[s], 6); /* this sensor's last value */
     } else if (s == S_XL) {
         xl_bytes(d, tns, (1ULL << 40) + k, w->data);
     } else if (s == S_G) {
@@ -407,6 +407,8 @@ static void push_word(sim_lsm6dsr_t *d, int s, sim_time_ps_t t, uint64_t k)
     } else {
         t_bytes(d, tns, w->data);
     }
+    memcpy(d->stream_last[s], w->data, 6);
+    d->stream_has_last[s] = true;
     d->fifo_count++;
 
     int trig = (d->regs[LSM6DSR_COUNTER_BDR_REG1] & 0x20) ? S_G : S_XL;
@@ -662,6 +664,8 @@ int32_t sim_lsm6dsr_read_reg(void *handle, uint8_t reg, uint8_t *buf, uint16_t l
                                (ff.ovr ? 0x40 : 0) | (ff.wtm ? 0x80 : 0));
             dev->ovr_latched = false; /* reset when this register is read */
             dev->counter_ia = false;
+        } else if (a > 0x7E) {
+            buf[i] = 0; /* 0x7F: reserved */
         } else if (a >= LSM6DSR_FIFO_DATA_OUT_TAG) {
             const sim_lsm6dsr_word_t *w = &dev->fifo[dev->fifo_head];
             bool empty = dev->fifo_count == 0;
@@ -681,7 +685,8 @@ int32_t sim_lsm6dsr_read_reg(void *handle, uint8_t reg, uint8_t *buf, uint16_t l
             dev->t_read = dev->t_sample;
         }
         if (inc) {
-            a = (uint8_t)((a + 1) & 0x7F);
+            /* FIFO output rolls back from 0x7E to 0x78 for multi-word bursts. */
+            a = a == 0x7E ? LSM6DSR_FIFO_DATA_OUT_TAG : (uint8_t)((a + 1) & 0x7F);
         }
     }
     if (f == SIM_FAULT_CORRUPT) {

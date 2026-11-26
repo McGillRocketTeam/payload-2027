@@ -184,6 +184,45 @@ void test_write_throughput_costs_time(void)
     TEST_ASSERT_EQUAL_INT(FR_OK, f_close(&fil));
 }
 
+void test_write_after_seek_past_eof_on_full_card_is_short(void)
+{
+    sim_sd_config_t cfg = sim_sd_default_config(ROOT);
+    cfg.capacity_bytes = 1000;
+    TEST_ASSERT_TRUE(sim_sd_init(&cfg));
+    TEST_ASSERT_EQUAL_INT(FR_OK, f_mount(&fs, "", 1));
+    TEST_ASSERT_EQUAL_INT(FR_OK, f_open(&fil, "gap.bin", FA_WRITE | FA_CREATE_ALWAYS));
+    TEST_ASSERT_EQUAL_INT(FR_OK, f_lseek(&fil, 1000000)); /* gap far beyond the free space */
+    uint8_t buf[512];
+    memset(buf, 0xA5, sizeof(buf));
+    UINT bw = 123;
+    TEST_ASSERT_EQUAL_INT(FR_OK, f_write(&fil, buf, sizeof(buf), &bw));
+    TEST_ASSERT_EQUAL_UINT(0, bw); /* disk full: short write, nothing past the buffer */
+    TEST_ASSERT_EQUAL_UINT32(0, f_size(&fil));
+    TEST_ASSERT_EQUAL_INT(FR_OK, f_close(&fil));
+}
+
+void test_lock_sees_through_path_spellings(void)
+{
+    static FIL other;
+    TEST_ASSERT_EQUAL_INT(FR_OK, f_open(&fil, "0:/same.bin", FA_WRITE | FA_CREATE_ALWAYS));
+    TEST_ASSERT_EQUAL_INT(FR_LOCKED, f_open(&other, "same.bin", FA_WRITE | FA_OPEN_ALWAYS));
+    TEST_ASSERT_EQUAL_INT(FR_LOCKED, f_open(&other, "/same.bin", FA_WRITE | FA_OPEN_ALWAYS));
+    TEST_ASSERT_EQUAL_INT(FR_LOCKED, f_unlink("same.bin"));
+    TEST_ASSERT_EQUAL_INT(FR_OK, f_close(&fil));
+    TEST_ASSERT_EQUAL_INT(FR_OK, f_unlink("/same.bin"));
+}
+
+void test_init_refuses_roots_it_must_not_wipe(void)
+{
+    static const char *bad[] = {"", ".", "./", ".//", "/", "..", "../x", ".pio/../..", "/tmp/sim_sd"};
+    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+        sim_sd_config_t cfg = sim_sd_default_config(bad[i]);
+        TEST_ASSERT_FALSE_MESSAGE(sim_sd_init(&cfg), bad[i]);
+    }
+    sim_sd_config_t ok = sim_sd_default_config("./" ROOT "/");
+    TEST_ASSERT_TRUE(sim_sd_init(&ok));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -196,5 +235,8 @@ int main(void)
     RUN_TEST(test_corrupt_write_flips_one_bit);
     RUN_TEST(test_full_card_gives_short_write);
     RUN_TEST(test_write_throughput_costs_time);
+    RUN_TEST(test_write_after_seek_past_eof_on_full_card_is_short);
+    RUN_TEST(test_lock_sees_through_path_spellings);
+    RUN_TEST(test_init_refuses_roots_it_must_not_wipe);
     return UNITY_END();
 }

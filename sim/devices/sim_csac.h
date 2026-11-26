@@ -90,7 +90,7 @@ void sim_csac_init(sim_csac_t *dev, const char *name, const sim_csac_config_t *c
 void sim_csac_power(sim_csac_t *dev, bool on);
 void sim_csac_attach_ref(sim_csac_t *dev, sim_pin_t *ref_pps);
 
-/* Lose atomic lock now; it is re-acquired after relock_s. */
+/* Lose atomic lock now; it is re-acquired after relock_s (INFINITY: never). */
 void sim_csac_lose_lock(sim_csac_t *dev, double relock_s);
 
 #endif /* SIM_DEVICES_SIM_CSAC_H_ */

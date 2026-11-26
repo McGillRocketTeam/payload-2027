@@ -200,7 +200,7 @@ static void update_alarms(sim_mac_t *d)
         } else if (sim_now_s() - d->hot_since_s > OVERHEAT_UNLOCK_S) {
             sim_log(d->base.name, "state", "overheat", sim_mac_baseplate_c(d), "lock lost");
             d->hot_since_s = -1.0;
-            sim_mac_lose_lock(d, 1e9); /* relocks when cooled: see on_own_pps */
+            sim_mac_lose_lock(d, INFINITY); /* relocks when cooled: see on_own_pps */
             d->overheated = true;
         }
     } else if (!hot) {
@@ -295,7 +295,7 @@ void sim_mac_fail_acquisition(sim_mac_t *dev)
 {
     dev->acq_failed = true;
     if (dev->clk.locked) {
-        sim_mac_lose_lock(dev, 1e9);
+        sim_mac_lose_lock(dev, INFINITY);
     }
     update_alarms(dev);
 }
@@ -310,8 +310,9 @@ void sim_mac_lose_lock(sim_mac_t *dev, double relock_s)
     sim_clock_set_locked(&dev->clk, false);
     sim_pin_set(&dev->bite, true);
     sim_log(dev->base.name, "state", "bite", 1, "lock lost");
-    if (dev->app_running) {
-        sim_schedule_ps(sim_now_ps() + (sim_time_ps_t)(relock_s * 1e12), lock_event, dev, dev->gen);
+    sim_time_ps_t t;
+    if (dev->app_running && sim_ps_after_s(relock_s, &t)) {
+        sim_schedule_ps(t, lock_event, dev, dev->gen);
     }
 }
 
@@ -537,6 +538,9 @@ static void execute(sim_mac_t *d, char *msg)
         ok(d, &r, d->has_stored ? "1" : "0");
     } else if (strcmp(cmd, "reset") == 0) {
         d->runtime_s += (double)(sim_now_ps() - d->power_on_ps) / 1e12;
+        if (d->clk.locked) {
+            d->locktime_s += (double)(sim_now_ps() - d->lock_ps) / 1e12;
+        }
         start(d); /* no response */
     } else if (strcmp(cmd, "app?") == 0) {
         ok(d, &r, "clock");

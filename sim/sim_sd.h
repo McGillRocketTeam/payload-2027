@@ -55,7 +55,9 @@ typedef struct {
 extern sim_sd_t sim_sd;
 
 sim_sd_config_t sim_sd_default_config(const char *root_dir);
-/* Creates root_dir if needed. Returns false if the folder can't be used. */
+/* Creates root_dir if needed. Returns false if the folder can't be used, or
+ * if it is unsafe to wipe: empty, "." / "/" in any spelling, any ".."
+ * component, or an absolute path while wipe_on_init is set. */
 bool sim_sd_init(const sim_sd_config_t *cfg);
 
 /* Pull power / eject: unsynced data lost, open handles invalid, unmounted. */

@@ -109,7 +109,7 @@ void sim_mac_attach_ref(sim_mac_t *dev, int input, sim_pin_t *ref_pps);
 
 /* The next (or current) lock attempt fails: Alarms bit 3, never locks. */
 void sim_mac_fail_acquisition(sim_mac_t *dev);
-/* Lose atomic lock now and re-acquire after relock_s. */
+/* Lose atomic lock now and re-acquire after relock_s (INFINITY: never). */
 void sim_mac_lose_lock(sim_mac_t *dev, double relock_s);
 
 /* Baseplate temperature now (ambient + start-up rise). */
